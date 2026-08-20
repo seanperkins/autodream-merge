@@ -1,0 +1,49 @@
+name: tests
+
+# push is filtered to main on purpose: with `pull_request:` also enabled, an
+# unfiltered push trigger runs every PR commit twice. Branch work is covered by
+# the PR trigger; both routes into main - a merge and a direct push - fire the
+# push trigger. A feature branch with no PR runs nothing, which is the trade.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # ubuntu, unlike the runner repos' macOS suites: nothing here depends on BSD
+    # `date`/`touch` semantics, and the merger itself shells out to no
+    # platform-sensitive command. Every test runs with --no-l2, so no network
+    # and no model call.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check deps
+        run: |
+          jq --version
+          python3 --version
+
+      - name: run-all
+        run: bash tests/run-all.sh
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Held at `warning`, matching the runner repos: a cron job nobody watches
+      # cannot afford a swallowed exit code, and that is the class shellcheck
+      # actually catches (SC2164, SC2155).
+      - name: shellcheck bin
+        run: shellcheck --severity=warning bin/*.sh
+
+      # Test code at `error` only - assertion helpers use `local x=$(cmd)`
+      # freely, where masking a return value has no consequence.
+      - name: shellcheck tests
+        run: shellcheck --severity=error tests/*.sh
