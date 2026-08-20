@@ -72,7 +72,7 @@ log "merging into $MERGED"
 # Filenames are sha1-12 of the session path, so two installs reading different stores
 # cannot collide. A collision would still be a silent overwrite, so it is checked rather
 # than assumed: the count of copied records must equal the count of inputs.
-copied=0; inputs=0; remerged=0; collisions=0; sources=""; declared=0; mismatched=0
+copied=0; inputs=0; remerged=0; collisions=0; sources=""; declared=0; overridden=0
 for spec in "${ARGS[@]}"; do
   dir="${spec%:*}"; src="${spec##*:}"
   [ -d "$dir" ] || { log "SKIP (no such findings dir): $dir"; continue; }
@@ -113,7 +113,7 @@ for spec in "${ARGS[@]}"; do
     rec_src="$(jq -r '.source // ""' "$f" 2>/dev/null)"
     if [ -n "$rec_src" ]; then
       declared=$((declared + 1))
-      [ "$rec_src" != "$src" ] && mismatched=$((mismatched + 1))
+      [ "$rec_src" != "$src" ] && overridden=$((overridden + 1))
     fi
     if jq --arg s "$src" '. + {source: (.source // $s)}' "$f" > "$dst.tmp" 2>/dev/null && mv "$dst.tmp" "$dst"; then
       copied=$((copied + 1)); n=$((n + 1))
@@ -130,7 +130,7 @@ for spec in "${ARGS[@]}"; do
 done
 log "merged $copied of $inputs record(s) ($remerged re-merged, $collisions collision(s)); sources: ${sources:-none}"
 if [ "$declared" -gt 0 ]; then
-  log "$declared record(s) carried their own source ($mismatched disagreed with the :source given and kept theirs)"
+  log "$declared record(s) carried their own source ($overridden disagreed with the :source given and kept theirs)"
 fi
 
 # ---- Phase 2: reconcile project identity ----
@@ -233,14 +233,19 @@ log "project identity: ${RECONCILED:-0} distinct project(s) after reconciliation
 {
   printf '# Autodream MERGED run self-audit — %s\n' "$DATE"
   printf 'merged_sources: %s\n' "${sources:-none}"
-  printf 'merged_records: %s\n' "$copied"
+  # Records in the dir, not copy operations. Two installs that overlap on a session write
+  # the same sha1-12 filename twice, so `copied` (kept below as merged_writes) exceeded the
+  # file count by exactly the overlap - 86 for a 60-record dir on 2026-08-18. A self-audit
+  # number that disagrees with `ls` sends its reader hunting a bug that isn't there.
+  printf 'merged_records: %s\n' "$(find "$MERGED" -maxdepth 1 -name '*.json' ! -name '*.stats.json' 2>/dev/null | wc -l | tr -d ' ')"
+  printf 'merged_writes: %s\n' "$copied"
   printf 'merged_remerged: %s\n' "$remerged"
   printf 'merged_collisions: %s\n' "$collisions"
   printf 'records_unreconciled_project: %s\n' "${UNRECONCILED:-0}"
   # Always emitted, even at zero: a consumer should never have to handle these being
   # absent, and a zero here is the meaningful "every dir was single-source" reading.
   printf 'records_source_self_declared: %s\n' "$declared"
-  printf 'records_source_mismatch: %s\n' "$mismatched"
+  printf 'records_source_overridden: %s\n' "$overridden"
   for spec in "${ARGS[@]}"; do
     dir="${spec%:*}"; src="${spec##*:}"
     rs="$dir/run-stats.txt"

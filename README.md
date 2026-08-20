@@ -71,7 +71,7 @@ findings dir is **not** guaranteed to be single-source — the pilot dir that tr
 harnesses in one run is exactly that. Blanket-stamping such a dir sent 26 Claude records
 through OMP reconciliation, where they had no OMP session header to read: they landed
 flagged *and* attributed to the wrong harness in the report. `records_source_self_declared`
-and `records_source_mismatch` in the merged self-audit make a mixed dir visible.
+and `records_source_overridden` in the merged self-audit make a mixed dir visible.
 
 Records that cannot be reconciled (session file since deleted, unreadable header) are
 counted as `records_unreconciled` in the merged self-audit rather than silently guessed. A

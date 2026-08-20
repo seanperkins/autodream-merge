@@ -149,8 +149,25 @@ test_mixed_dir_is_reported(){
   assert_grep "$root/merge.out" 'carried their own source' "the log names the self-declared records"
   assert_grep "$(mdir "$root")/run-stats.txt" 'records_source_self_declared: 1' \
     "the self-audit counts them"
-  assert_grep "$(mdir "$root")/run-stats.txt" 'records_source_mismatch: 1' \
+  assert_grep "$(mdir "$root")/run-stats.txt" 'records_source_overridden: 1' \
     "and counts the ones that disagreed with the :source given"
+  rm -rf "$root"
+}
+
+test_overlapping_dirs_count_records_not_writes(){
+  echo "# self-audit: merged_records is records in the dir, not copy operations"
+  local root; root=$(setup)
+  # Two installs that both triaged the SAME session - the real 2026-08-18 shape, where a
+  # pilot run and the nightly overlapped on 26 Claude sessions. Same session path means the
+  # same sha1-12 filename, so the merged dir holds ONE record and the second copy is an
+  # overwrite. Reporting 3 records for a 2-record dir sends a reader looking for a bug.
+  mk_finding "$root/omp/findings/$DATE" aaaaaaaaaaaa "/store/claude/-Users-x-sites/s.jsonl" "-Users-x-sites"
+  run_merge "$root" || no "merge exited non-zero"
+  local files; files=$(find "$(mdir "$root")" -maxdepth 1 -name '*.json' ! -name '*.stats.json' | wc -l | tr -d ' ')
+  assert_eq "$files" "2" "the dir holds one record per session"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_records: 2' "and the self-audit agrees with the dir"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_writes: 3' "while the write count stays visible"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_remerged: 1' "as does the overlap"
   rm -rf "$root"
 }
 
@@ -164,6 +181,7 @@ test_real_collision_is_kept_and_counted
 test_unreconcilable_project_is_flagged
 test_record_source_wins_over_dir_label
 test_mixed_dir_is_reported
+test_overlapping_dirs_count_records_not_writes
 echo "----------------------------------------"
 echo "passed: $pass   failed: $fail"
 [ "$fail" -eq 0 ]
