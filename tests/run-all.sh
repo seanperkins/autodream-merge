@@ -85,7 +85,11 @@ test_rerun_is_idempotent(){
   # merged_records: 0 — the aggregator caught that zero in the report before I did.
   assert_nogrep "$root/merge.out" 'COLLISION' "no false collision on re-run"
   assert_grep "$(mdir "$root")/run-stats.txt" 'merged_records: 2' "re-run still counts the records"
-  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_remerged: 2' "and reports them as re-merged"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_preexisting: 2' "and reports them as already present"
+  # Re-run stability: the CROSS-DIR overlap must not absorb the re-run. Conflating the two
+  # is what turned a meaningful "the two installs share 26 sessions" into "86 of 86" the
+  # first time this tool was re-run over a real merged dir.
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_overlap: 0' "the inputs did not overlap, and a re-run does not invent overlap"
   assert_grep "$(mdir "$root")/run-stats.txt" 'merged_collisions: 0' "with no collisions"
   rm -rf "$root"
 }
@@ -167,7 +171,12 @@ test_overlapping_dirs_count_records_not_writes(){
   assert_eq "$files" "2" "the dir holds one record per session"
   assert_grep "$(mdir "$root")/run-stats.txt" 'merged_records: 2' "and the self-audit agrees with the dir"
   assert_grep "$(mdir "$root")/run-stats.txt" 'merged_writes: 3' "while the write count stays visible"
-  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_remerged: 1' "as does the overlap"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_overlap: 1' "and the cross-dir overlap is named"
+  # The property my own re-run broke: overlap is a fact about the INPUTS, so it must read
+  # the same on a second pass instead of being swallowed by "everything was already here".
+  run_merge "$root" || no "second merge exited non-zero"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_overlap: 1' "overlap survives a re-run"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'merged_preexisting: 2' "which is reported separately"
   rm -rf "$root"
 }
 

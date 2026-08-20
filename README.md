@@ -111,7 +111,7 @@ each findings dir carries a `l1-only` marker file once its L1 is complete.
 tests/run-all.sh
 ```
 
-24 assertions covering source stamping and precedence, cwd reconciliation, idempotent re-merge, genuine
+31 assertions covering source stamping and precedence, cwd reconciliation, re-run stability (cross-dir overlap vs. idempotency, reported separately), genuine
 filename collisions (kept, warned, counted separately from a re-merge), and unreconcilable
 records. Every test runs with `--no-l2` and asserts on artifacts.
 

@@ -72,7 +72,14 @@ log "merging into $MERGED"
 # Filenames are sha1-12 of the session path, so two installs reading different stores
 # cannot collide. A collision would still be a silent overwrite, so it is checked rather
 # than assumed: the count of copied records must equal the count of inputs.
-copied=0; inputs=0; remerged=0; collisions=0; sources=""; declared=0; overridden=0
+copied=0; inputs=0; overlap=0; preexisting=0; collisions=0; sources=""; declared=0; overridden=0
+# Basenames written by THIS invocation. `[ -e "$dst" ]` alone cannot tell "the other input
+# dir already gave me this session" from "a previous run of this tool did", and those are
+# different facts: the first is a property of the inputs the operator chose, the second is
+# idempotency. Conflating them reported `86 of 86` on a re-run of a merge whose real
+# cross-source overlap was 26. A file, not an associative array: macOS ships bash 3.2.
+SEEN="$(mktemp -t admseen.XXXXXX)" || exit 2
+trap 'rm -f "$SEEN"' EXIT
 for spec in "${ARGS[@]}"; do
   dir="${spec%:*}"; src="${spec##*:}"
   [ -d "$dir" ] || { log "SKIP (no such findings dir): $dir"; continue; }
@@ -99,8 +106,13 @@ for spec in "${ARGS[@]}"; do
         log "COLLISION: $base maps to two different sessions; keeping $prev_sp, skipping $cur_sp"
         continue
       fi
-      remerged=$((remerged + 1))
+      if grep -qxF "$base" "$SEEN" 2>/dev/null; then
+        overlap=$((overlap + 1))
+      else
+        preexisting=$((preexisting + 1))
+      fi
     fi
+    printf '%s\n' "$base" >> "$SEEN"
     # Source precedence: the RECORD wins, the directory label is only a default. When this
     # was written the runners emitted no `source` and stamping from the directory was the
     # only option; cc-autodream's per-source triage now stamps it deterministically, so a
@@ -128,7 +140,7 @@ for spec in "${ARGS[@]}"; do
   done
   log "collected $n record(s) from $dir (source=$src)"
 done
-log "merged $copied of $inputs record(s) ($remerged re-merged, $collisions collision(s)); sources: ${sources:-none}"
+log "merged $copied write(s) from $inputs input(s); $overlap cross-dir overlap, $preexisting already present, $collisions collision(s); sources: ${sources:-none}"
 if [ "$declared" -gt 0 ]; then
   log "$declared record(s) carried their own source ($overridden disagreed with the :source given and kept theirs)"
 fi
@@ -239,7 +251,11 @@ log "project identity: ${RECONCILED:-0} distinct project(s) after reconciliation
   # number that disagrees with `ls` sends its reader hunting a bug that isn't there.
   printf 'merged_records: %s\n' "$(find "$MERGED" -maxdepth 1 -name '*.json' ! -name '*.stats.json' 2>/dev/null | wc -l | tr -d ' ')"
   printf 'merged_writes: %s\n' "$copied"
-  printf 'merged_remerged: %s\n' "$remerged"
+  # Overlap is a fact about the inputs (the two installs triaged the same session);
+  # preexisting is idempotency (this tool ran before). Separate keys because they answer
+  # different questions and one used to swallow the other on any re-run.
+  printf 'merged_overlap: %s\n' "$overlap"
+  printf 'merged_preexisting: %s\n' "$preexisting"
   printf 'merged_collisions: %s\n' "$collisions"
   printf 'records_unreconciled_project: %s\n' "${UNRECONCILED:-0}"
   # Always emitted, even at zero: a consumer should never have to handle these being
