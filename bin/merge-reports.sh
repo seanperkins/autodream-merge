@@ -72,7 +72,7 @@ log "merging into $MERGED"
 # Filenames are sha1-12 of the session path, so two installs reading different stores
 # cannot collide. A collision would still be a silent overwrite, so it is checked rather
 # than assumed: the count of copied records must equal the count of inputs.
-copied=0; inputs=0; remerged=0; collisions=0; sources=""
+copied=0; inputs=0; remerged=0; collisions=0; sources=""; declared=0; mismatched=0
 for spec in "${ARGS[@]}"; do
   dir="${spec%:*}"; src="${spec##*:}"
   [ -d "$dir" ] || { log "SKIP (no such findings dir): $dir"; continue; }
@@ -101,10 +101,21 @@ for spec in "${ARGS[@]}"; do
       fi
       remerged=$((remerged + 1))
     fi
-    # Stamp the source from the directory it came from, never from the record: the
-    # runners do not emit this field, and a merged record with no provenance is
-    # unusable for the per-source rules the aggregator applies downstream.
-    if jq --arg s "$src" '. + {source: $s}' "$f" > "$dst.tmp" 2>/dev/null && mv "$dst.tmp" "$dst"; then
+    # Source precedence: the RECORD wins, the directory label is only a default. When this
+    # was written the runners emitted no `source` and stamping from the directory was the
+    # only option; cc-autodream's per-source triage now stamps it deterministically, so a
+    # findings dir is no longer guaranteed to be single-source. The pilot dir that triaged
+    # both harnesses in one run is exactly that, and blanket-stamping it sent 26 Claude
+    # records through omp reconciliation - which reads an OMP session header they do not
+    # have, so they landed flagged AND attributed to the wrong harness in the report.
+    # Counted rather than quietly preferred: a dir whose contents disagree with the label
+    # the operator typed is worth seeing, in the log and in the self-audit.
+    rec_src="$(jq -r '.source // ""' "$f" 2>/dev/null)"
+    if [ -n "$rec_src" ]; then
+      declared=$((declared + 1))
+      [ "$rec_src" != "$src" ] && mismatched=$((mismatched + 1))
+    fi
+    if jq --arg s "$src" '. + {source: (.source // $s)}' "$f" > "$dst.tmp" 2>/dev/null && mv "$dst.tmp" "$dst"; then
       copied=$((copied + 1)); n=$((n + 1))
     else
       rm -f "$dst.tmp"
@@ -118,6 +129,9 @@ for spec in "${ARGS[@]}"; do
   log "collected $n record(s) from $dir (source=$src)"
 done
 log "merged $copied of $inputs record(s) ($remerged re-merged, $collisions collision(s)); sources: ${sources:-none}"
+if [ "$declared" -gt 0 ]; then
+  log "$declared record(s) carried their own source ($mismatched disagreed with the :source given and kept theirs)"
+fi
 
 # ---- Phase 2: reconcile project identity ----
 # Output is captured, not printed: the counts belong in the log next to everything else,
@@ -223,6 +237,10 @@ log "project identity: ${RECONCILED:-0} distinct project(s) after reconciliation
   printf 'merged_remerged: %s\n' "$remerged"
   printf 'merged_collisions: %s\n' "$collisions"
   printf 'records_unreconciled_project: %s\n' "${UNRECONCILED:-0}"
+  # Always emitted, even at zero: a consumer should never have to handle these being
+  # absent, and a zero here is the meaningful "every dir was single-source" reading.
+  printf 'records_source_self_declared: %s\n' "$declared"
+  printf 'records_source_mismatch: %s\n' "$mismatched"
   for spec in "${ARGS[@]}"; do
     dir="${spec%:*}"; src="${spec##*:}"
     rs="$dir/run-stats.txt"

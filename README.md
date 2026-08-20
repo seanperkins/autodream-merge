@@ -63,6 +63,16 @@ the way Claude encodes buckets, so both harnesses' work on one directory groups 
 project. Measured on the real corpus: **17 apparent projects reconcile to 8 real ones**,
 byte-identical to the ground truth from a single dual-source run.
 
+### Source precedence
+
+A record's own `source` field wins; the `:source` suffix is only a default for records
+that lack one. cc-autodream stamps `source` itself as of its per-source triage work, so a
+findings dir is **not** guaranteed to be single-source — the pilot dir that triaged both
+harnesses in one run is exactly that. Blanket-stamping such a dir sent 26 Claude records
+through OMP reconciliation, where they had no OMP session header to read: they landed
+flagged *and* attributed to the wrong harness in the report. `records_source_self_declared`
+and `records_source_mismatch` in the merged self-audit make a mixed dir visible.
+
 Records that cannot be reconciled (session file since deleted, unreadable header) are
 counted as `records_unreconciled` in the merged self-audit rather than silently guessed. A
 split group stays visible.
@@ -101,7 +111,7 @@ each findings dir carries a `l1-only` marker file once its L1 is complete.
 tests/run-all.sh
 ```
 
-19 assertions covering source stamping, cwd reconciliation, idempotent re-merge, genuine
+24 assertions covering source stamping and precedence, cwd reconciliation, idempotent re-merge, genuine
 filename collisions (kept, warned, counted separately from a re-merge), and unreconcilable
 records. Every test runs with `--no-l2` and asserts on artifacts.
 

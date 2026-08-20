@@ -117,6 +117,43 @@ test_unreconcilable_project_is_flagged(){
   rm -rf "$root"
 }
 
+# A findings record written by a SOURCE-AWARE runner: cc-autodream stamps `source` itself
+# as of its per-source triage work, so a findings dir is no longer guaranteed to be
+# single-source. The pilot dir that triaged both harnesses in one run is exactly this.
+mk_finding_src(){ # $1=dir $2=hash $3=session_path $4=project $5=source
+  mkdir -p "$1"
+  printf '{"session_path":"%s","project":"%s","source":"%s","findings":[{"category":"tool_loop","severity":"low"}]}\n' \
+    "$3" "$4" "$5" > "$1/$2.json"
+}
+
+test_record_source_wins_over_dir_label(){
+  echo "# collect: a record that declares its own source keeps it"
+  local root; root=$(setup)
+  # A Claude-sourced record sitting in a dir passed as :omp. Blanket-stamping it `omp`
+  # would then send it through omp reconciliation, which reads an OMP session header it
+  # does not have - so it lands flagged, and the report attributes Claude work to OMP.
+  mk_finding_src "$root/omp/findings/$DATE" cccccccccccc "/store/claude/-Users-x-sites/m.jsonl" "-Users-x-sites" claude
+  run_merge "$root" || no "merge exited non-zero"
+  assert_eq "$(jq -r .source "$(mdir "$root")/cccccccccccc.json")" "claude" \
+    "the record's own source is kept, not the directory's label"
+  assert_nogrep "$(mdir "$root")/cccccccccccc.json" 'project_unreconciled' \
+    "and it is not run through omp reconciliation"
+  rm -rf "$root"
+}
+
+test_mixed_dir_is_reported(){
+  echo "# collect: a mixed findings dir is auditable, not silent"
+  local root; root=$(setup)
+  mk_finding_src "$root/omp/findings/$DATE" cccccccccccc "/store/claude/-Users-x-sites/m.jsonl" "-Users-x-sites" claude
+  run_merge "$root" || no "merge exited non-zero"
+  assert_grep "$root/merge.out" 'carried their own source' "the log names the self-declared records"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'records_source_self_declared: 1' \
+    "the self-audit counts them"
+  assert_grep "$(mdir "$root")/run-stats.txt" 'records_source_mismatch: 1' \
+    "and counts the ones that disagreed with the :source given"
+  rm -rf "$root"
+}
+
 [ -x "$MERGE" ] || { echo "FATAL: $MERGE not executable"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required"; exit 1; }
 echo "autodream-merge tests"
@@ -125,6 +162,8 @@ test_reconciles_project_identity
 test_rerun_is_idempotent
 test_real_collision_is_kept_and_counted
 test_unreconcilable_project_is_flagged
+test_record_source_wins_over_dir_label
+test_mixed_dir_is_reported
 echo "----------------------------------------"
 echo "passed: $pass   failed: $fail"
 [ "$fail" -eq 0 ]
